@@ -14,10 +14,11 @@ $https =
 session_set_cookie_params([
     'lifetime' => 0,
     'path'     => '/',
-    'domain'   => '',
+    'domain'   => '',  // Empty domain untuk host-only cookies
     'secure'   => $https,
     'httponly' => true,
     'samesite' => 'Lax',
 ]);
 
 session_start();
+

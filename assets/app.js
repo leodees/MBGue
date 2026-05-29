@@ -5,16 +5,22 @@
 
 const State = {
   jenjang: "SMK",
-  siswa: 32,
-  ompreng: 32,
+  siswa: 36,
+  ompreng: 36,
   kondisi: "baik",
   fotoDataURL: null,
   fotoRetDataURL: null,
   pengambilan: [],
   pengembalian: [],
+  notifications: [],
 };
 
 let chartMbgMinggu = null;
+let camStream = null;
+let camMode = null;
+
+const FOTO_MAX_W = 900;
+const FOTO_QUALITY = 0.75;
 
 const fetchCred = { credentials: "same-origin" };
 
@@ -63,7 +69,16 @@ document.addEventListener("DOMContentLoaded", async () => {
   await loadData();
   updateNotifPanelContent();
 
+  initSidebarHover();
+
   document.addEventListener("click", (e) => {
+    const fotoBtn = e.target.closest(".rekap-foto-btn");
+    if (fotoBtn?.dataset.foto) {
+      e.preventDefault();
+      openLightbox(fotoBtn.dataset.foto);
+      return;
+    }
+
     const slot = document.querySelector(".topbar-notif-slot");
     const panel = document.getElementById("notif-dropdown");
     const btn = document.getElementById("notif-toggle");
@@ -71,6 +86,10 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (slot.contains(e.target)) return;
     panel.classList.remove("open");
     btn?.setAttribute("aria-expanded", "false");
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeLightbox();
   });
 
   const wrap = document.getElementById("content-wrap");
@@ -106,9 +125,75 @@ function toggleTheme() {
 
 function syncThemeToggleLabel() {
   const dark = document.documentElement.getAttribute("data-theme") === "dark";
-  const label = dark ? "Gelap" : "Terang";
-  const el = document.getElementById("theme-toggle-label");
-  if (el) el.textContent = label;
+  const btn = document.getElementById("theme-toggle");
+  if (!btn) return;
+  const title = dark
+    ? "Mode gelap — klik untuk terang"
+    : "Mode terang — klik untuk gelap";
+  btn.title = title;
+  btn.setAttribute("aria-label", title);
+}
+
+function isSidebarMobile() {
+  return window.innerWidth <= 768;
+}
+
+function initSidebarHover() {
+  const sb = document.getElementById("sidebar");
+  const edge = document.getElementById("sb-edge-trigger");
+  const overlay = document.getElementById("overlay");
+  if (!sb || !edge) return;
+
+  let collapseTimer = null;
+
+  const expandSidebar = () => {
+    clearTimeout(collapseTimer);
+    if (isSidebarMobile()) {
+      sb.classList.add("open");
+      overlay?.classList.add("show");
+    } else {
+      sb.classList.remove("collapsed");
+    }
+  };
+
+  const collapseSidebar = () => {
+    if (isSidebarMobile()) {
+      sb.classList.remove("open");
+      overlay?.classList.remove("show");
+    } else {
+      sb.classList.add("collapsed");
+    }
+  };
+
+  const scheduleCollapse = () => {
+    clearTimeout(collapseTimer);
+    collapseTimer = setTimeout(() => {
+      if (!sb.matches(":hover") && !edge.matches(":hover")) {
+        collapseSidebar();
+      }
+    }, 380);
+  };
+
+  edge.addEventListener("mouseenter", expandSidebar);
+  sb.addEventListener("mouseenter", expandSidebar);
+  edge.addEventListener("mouseleave", scheduleCollapse);
+  sb.addEventListener("mouseleave", scheduleCollapse);
+
+  const syncSidebarLayout = () => {
+    clearTimeout(collapseTimer);
+    if (isSidebarMobile()) {
+      sb.classList.remove("collapsed");
+    } else {
+      sb.classList.remove("open");
+      overlay?.classList.remove("show");
+      if (!sb.matches(":hover") && !edge.matches(":hover")) {
+        sb.classList.add("collapsed");
+      }
+    }
+  };
+
+  syncSidebarLayout();
+  window.addEventListener("resize", syncSidebarLayout);
 }
 
 function initSessionUser() {
@@ -126,6 +211,236 @@ function initSessionUser() {
   if (iniEl) iniEl.textContent = (u.nama || "?").trim().charAt(0).toUpperCase();
   const rl = labels[u.role] || u.role;
   if (roleEl) roleEl.textContent = rl;
+  updateSaranAccess();
+}
+
+function updateSaranAccess() {
+  const allowed = ["perwakilan_kelas", "petugas_mbg"];
+  const role = window.SIAP_USER?.role || "";
+  const formPanel = document.querySelector(".saran-form-panel");
+  if (!formPanel) return;
+  const noteEl = document.getElementById("saran-access-note");
+  const submitBtn = document.querySelector(
+    '.saran-form-panel button[onclick="kirimSaran()"]',
+  );
+  const jenisField = document.getElementById("saran-jenis");
+  const isiField = document.getElementById("saran-isi");
+
+  if (allowed.includes(role)) {
+    if (noteEl) {
+      noteEl.textContent =
+        "Perwakilan kelas dan petugas MBG dapat mengirim masukan. Dapur SPPG menerima masukan ini.";
+    }
+    if (submitBtn) submitBtn.disabled = false;
+    if (jenisField) jenisField.disabled = false;
+    if (isiField) isiField.disabled = false;
+    formPanel.style.display = "block";
+    formPanel.style.opacity = "1";
+  } else {
+    formPanel.style.display = "none";
+  }
+}
+
+async function loadNotifications() {
+  try {
+    const res = await fetch("api/notifikasi.php", fetchCred);
+    const j = await parseApiJson(res);
+    if (j.status === "ok" && Array.isArray(j.data)) {
+      State.notifications = j.data;
+    } else {
+      State.notifications = [];
+    }
+  } catch (_) {
+    State.notifications = [];
+  }
+  updateNotifPanelContent();
+}
+
+async function markAllNotificationsRead() {
+  try {
+    await fetch("api/notifikasi.php", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ action: "mark_all_read" }),
+    });
+  } catch (_) {}
+  await loadNotifications();
+}
+
+function updateNotifPanelContent() {
+  const body = document.getElementById("notif-dropdown-body");
+  if (!body) return;
+  const notifications = State.notifications || [];
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
+  const pending = State.pengambilan.filter(
+    (r) => !r.statusKembali && Number(r.jumlah_ambil || r.jumlah || 0) > 0,
+  );
+  const items = [];
+
+  notifications.forEach((n) => {
+    const label =
+      n.jenis === "masukan_baru" ? "Masukan baru" : "Feedback masukan";
+    const time = n.created_at
+      ? new Date(n.created_at).toLocaleString("id-ID")
+      : "";
+    const deleteBtn =
+      n.jenis === "masukan_baru" || n.jenis === "masukan_feedback"
+        ? `<button class="notif-item-delete" onclick="deleteNotification(${Number(n.id)})" title="Hapus notifikasi" aria-label="Hapus notifikasi"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-9l-1 1H5v2h14V4z"/></svg></button>`
+        : "";
+    items.push(
+      `<li><div class="notif-item-wrapper"><div><strong>${escapeHtml(label)}</strong> — ${escapeHtml(n.isi)}<br><small>${escapeHtml(time)}</small></div>${deleteBtn}</div></li>`,
+    );
+  });
+
+  pending.forEach((r) => {
+    items.push(
+      `<li><strong>${escapeHtml(r.kelas)}</strong> — ompreng belum dikembalikan (${Number(
+        r.jumlah_ambil || r.jumlah || 0,
+      )} porsi)</li>`,
+    );
+  });
+
+  if (!items.length) {
+    body.innerHTML =
+      '<p class="notif-empty">Belum ada notifikasi. Notifikasi akan muncul ketika ada masukan atau tanggapan.</p>';
+  } else {
+    body.innerHTML = `<ul class="notif-list">${items.join("")}</ul>`;
+  }
+
+  safeSet("topbar-notif", unreadCount + pending.length);
+}
+
+async function renderMasukanPage() {
+  const tb = document.querySelector("#tbl-masukan tbody");
+  if (!tb) return;
+  const role = window.SIAP_USER?.role || "";
+  if (role !== "dapur_sppg") {
+    tb.innerHTML =
+      '<tr><td colspan="7" class="empty-td">Daftar masukan hanya dapat dilihat oleh Dapur SPPG. Anda tetap dapat mengirim masukan melalui form di atas.</td></tr>';
+    return;
+  }
+
+  tb.innerHTML =
+    '<tr><td colspan="7" class="empty-td">Memuat masukan...</td></tr>';
+  try {
+    const res = await fetch("api/saran.php", fetchCred);
+    const j = await parseApiJson(res);
+    if (j.status !== "ok" || !Array.isArray(j.data)) {
+      tb.innerHTML = `<tr><td colspan="7" class="empty-td">${escapeHtml(j.pesan || "Gagal memuat daftar masukan")}</td></tr>`;
+      return;
+    }
+
+    const rows = j.data;
+    if (!rows.length) {
+      tb.innerHTML =
+        '<tr><td colspan="7" class="empty-td">Belum ada masukan</td></tr>';
+      return;
+    }
+
+    tb.innerHTML = rows
+      .map((r) => {
+        const waktu = r.created_at
+          ? new Date(r.created_at).toLocaleString("id-ID")
+          : "—";
+        const pengirim = `${escapeHtml(r.nama_pengguna || "")}${r.kelas_info ? ` (${escapeHtml(r.kelas_info)})` : ""}`;
+        const jenisLabel =
+          r.jenis === "kritik"
+            ? "Kritik"
+            : r.jenis === "lain"
+              ? "Lainnya"
+              : "Saran";
+        const statusClass =
+          r.status === "approved"
+            ? "badge badge-green"
+            : r.status === "rejected"
+              ? "badge badge-red"
+              : r.status === "diproses"
+                ? "badge badge-orange"
+                : "badge badge-blue";
+        const statusLabel =
+          r.status === "approved"
+            ? "Disetujui"
+            : r.status === "rejected"
+              ? "Ditolak"
+              : r.status === "diproses"
+                ? "Sedang diproses"
+                : "Baru";
+        const response = r.respon_dapur ? escapeHtml(r.respon_dapur) : "—";
+        const actionButtons =
+          window.SIAP_USER?.role === "dapur_sppg" && r.status === "baru"
+            ? `<button type="button" class="btn-filter" onclick="requestMasukanFeedback(${Number(
+                r.id,
+              )}, 'approved')">Setujui</button>
+               <button type="button" class="btn-filter" onclick="requestMasukanFeedback(${Number(
+                 r.id,
+               )}, 'rejected')">Tolak</button>`
+            : "—";
+
+        return `<tr>
+          <td>${escapeHtml(waktu)}</td>
+          <td>${pengirim}</td>
+          <td>${escapeHtml(jenisLabel)}</td>
+          <td><span class="badge ${statusClass}">${escapeHtml(statusLabel)}</span></td>
+          <td class="td-wrap">${escapeHtml(r.isi)}</td>
+          <td class="td-wrap">${response}</td>
+          <td>${actionButtons}</td>
+        </tr>`;
+      })
+      .join("");
+  } catch (err) {
+    console.error(err);
+    tb.innerHTML =
+      '<tr><td colspan="7" class="empty-td">Gagal memuat daftar masukan</td></tr>';
+  }
+}
+
+async function requestMasukanFeedback(id, status) {
+  const alasan = window.prompt(
+    `Tambahkan catatan / alasan untuk status ${status === "approved" ? "disetujui" : "ditolak"} (opsional):`,
+  );
+  try {
+    const res = await fetch("api/saran.php", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        action: "feedback",
+        id,
+        status,
+        respon: alasan || "",
+      }),
+    });
+    const j = await parseApiJson(res);
+    showToast(j.pesan || (j.status === "ok" ? "Tersimpan" : "Gagal"));
+    if (j.status === "ok") {
+      await renderMasukanPage();
+      await loadNotifications();
+    }
+  } catch (err) {
+    console.error(err);
+    showToast("Gagal menyimpan tanggapan");
+  }
+}
+
+async function clearMasukanHistory() {
+  if (!confirm("Hapus semua riwayat masukan? Tindakan ini tidak dapat dibatalkan.")) return;
+  try {
+    const res = await fetch("api/saran.php", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ action: "clear_history" }),
+    });
+    const j = await parseApiJson(res);
+    showToast(j.pesan || (j.status === "ok" ? "Riwayat dihapus" : "Gagal"));
+    if (j.status === "ok") {
+      await renderMasukanPage();
+    }
+  } catch (err) {
+    console.error(err);
+    showToast("Gagal menghapus riwayat");
+  }
 }
 
 function escapeHtml(s) {
@@ -136,6 +451,18 @@ function escapeHtml(s) {
 
 function initAuthPortal() {
   toggleKelasField();
+  // Set welcome message based on returning user status
+  const isReturning = localStorage.getItem("mbg_returning_user") === "1";
+  const title = document.getElementById("auth-welcome-title");
+  const sub = document.getElementById("auth-welcome-sub");
+  if (title)
+    title.textContent = isReturning
+      ? "Selamat Datang Kembali!"
+      : "Selamat Datang!";
+  if (sub)
+    sub.textContent = isReturning
+      ? "Masuk ke akun Anda untuk melanjutkan"
+      : "Masuk atau daftar untuk mulai menggunakan MBGue";
 }
 
 function setAuthTab(tab) {
@@ -145,6 +472,24 @@ function setAuthTab(tab) {
   document.querySelectorAll(".auth-form").forEach((f) => {
     f.classList.toggle("active", f.id === `form-${tab}`);
   });
+
+  // Update welcome heading based on active tab
+  const isReturning = localStorage.getItem("mbg_returning_user") === "1";
+  const title = document.getElementById("auth-welcome-title");
+  const sub = document.getElementById("auth-welcome-sub");
+  if (title && sub) {
+    if (tab === "register") {
+      title.textContent = "Buat Akun Baru";
+      sub.textContent = "Daftar untuk mulai menggunakan MBGue";
+    } else {
+      title.textContent = isReturning
+        ? "Selamat Datang Kembali!"
+        : "Selamat Datang!";
+      sub.textContent = isReturning
+        ? "Masuk ke akun Anda untuk melanjutkan"
+        : "Masuk atau daftar untuk mulai menggunakan MBGue";
+    }
+  }
 }
 
 function toggleKelasField() {
@@ -169,13 +514,19 @@ async function submitLogin(ev) {
       body: JSON.stringify({ action: "login", email, password }),
     });
     const j = await res.json().catch(() => ({}));
+    console.log("Login response:", j, "Status:", res.status);
     if (j.status === "ok") {
+      localStorage.setItem("mbg_returning_user", "1");
+      // Simpan user data ke localStorage sebagai fallback untuk cross-port access
+      localStorage.setItem("mbg_user_cache", JSON.stringify(j.user || {}));
       showToast("Berhasil masuk");
-      setTimeout(() => location.reload(), 500);
+      // Tunggu lebih lama untuk memastikan session cookie tersimpan
+      setTimeout(() => location.reload(), 1000);
     } else {
-      showToast("Gagal masuk");
+      showToast(j.pesan || "Gagal masuk");
     }
-  } catch (_) {
+  } catch (err) {
+    console.error("Login error:", err);
     showToast("Tidak terhubung ke server.");
   }
   return false;
@@ -204,13 +555,19 @@ async function submitRegister(ev) {
       }),
     });
     const j = await res.json().catch(() => ({}));
+    console.log("Register response:", j, "Status:", res.status);
     if (j.status === "ok") {
+      // Simpan user data ke localStorage sebagai fallback untuk cross-port access
+      localStorage.setItem("mbg_user_cache", JSON.stringify(j.user || {}));
       showToast("Anda berhasil daftar");
-      setAuthTab("login");
+      setTimeout(() => location.reload(), 1000);
     } else {
-      showToast("Pendaftaran gagal");
+      showToast(
+        j.pesan || "Pendaftaran gagal: " + (res.status || "unknown error"),
+      );
     }
-  } catch (_) {
+  } catch (err) {
+    console.error("Register error:", err);
     showToast("Tidak terhubung ke server.");
   }
   return false;
@@ -225,6 +582,9 @@ async function logoutUser() {
       body: JSON.stringify({ action: "logout" }),
     });
   } catch (_) {}
+  // Clear localStorage cache
+  localStorage.removeItem("mbg_user_cache");
+  localStorage.removeItem("mbg_returning_user");
   location.reload();
 }
 
@@ -341,6 +701,47 @@ async function exportLaporanMingguan() {
   }
 }
 
+async function clearRekapHistory() {
+  const role = window.SIAP_USER?.role || "";
+  if (role !== "petugas_mbg") {
+    showToast("Hanya petugas MBG yang dapat membersihkan riwayat rekap.");
+    return;
+  }
+
+  const tanggal =
+    document.getElementById("filter-tanggal")?.value || localISODate();
+  if (!tanggal) {
+    showToast("Tanggal rekap tidak tersedia untuk pembersihan");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Hapus riwayat rekap untuk tanggal ${tanggal}? Data pengambilan dan pengembalian akan dihapus dari database.`,
+  );
+  if (!confirmed) return;
+
+  try {
+    const resp = await fetch("api/rekap_clear.php", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ tanggal }),
+      ...fetchCred,
+    });
+    const data = await parseApiJson(resp);
+    if (data.status !== "ok") {
+      showToast(data.pesan || "Gagal membersihkan riwayat rekap");
+      return;
+    }
+    showToast(data.pesan || "Riwayat rekap berhasil dibersihkan");
+    renderRekap();
+  } catch (err) {
+    console.error(err);
+    showToast("Gagal membersihkan riwayat rekap");
+  }
+}
+
 function setFooterDate() {
   const opts = {
     weekday: "long",
@@ -382,27 +783,12 @@ function getWIBGreeting() {
   return "Selamat Malam";
 }
 
-function toggleSidebar() {
-  const sb = document.getElementById("sidebar");
-  const burger = document.getElementById("burger");
-  const overlay = document.getElementById("overlay");
-  const isMobile = window.innerWidth <= 768;
-  if (!sb || !burger || !overlay) return;
-
-  if (isMobile) {
-    sb.classList.toggle("open");
-    burger.classList.toggle("open");
-    overlay.classList.toggle("show");
-  } else {
-    sb.classList.toggle("collapsed");
-    burger.classList.toggle("open");
-  }
-}
-
 function closeSidebar() {
-  document.getElementById("sidebar")?.classList.remove("open");
-  document.getElementById("burger")?.classList.remove("open");
-  document.getElementById("overlay")?.classList.remove("show");
+  const sb = document.getElementById("sidebar");
+  const overlay = document.getElementById("overlay");
+  sb?.classList.remove("open");
+  overlay?.classList.remove("show");
+  if (!isSidebarMobile()) sb?.classList.add("collapsed");
 }
 
 function navigate(pageId, btn) {
@@ -434,6 +820,7 @@ function navigate(pageId, btn) {
   if (pageId === "pengembalian") renderPendingList();
   if (pageId === "rekap") renderRekap();
   if (pageId === "dashboard") refreshDashboard();
+  if (pageId === "saran") renderMasukanPage();
   if (pageId === "petugas") loadPetugasAdmin();
 }
 
@@ -527,80 +914,181 @@ function selectKondisi(val, label) {
   document
     .querySelectorAll(".kondisi-check")
     .forEach((c) => c.classList.remove("active"));
-  if (label) label.querySelector(".kondisi-check")?.classList.add("active");
+  document
+    .querySelectorAll(".kondisi-opt")
+    .forEach((o) => o.classList.remove("selected"));
+  if (label) {
+    label.querySelector(".kondisi-check")?.classList.add("active");
+    label.classList.add("selected");
+  }
+}
+
+function formatStampWaktu() {
+  return new Date().toLocaleString("id-ID", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function getStampAmbil() {
+  const tingkat = document.getElementById("kelas-tingkat")?.value || "10";
+  const huruf = document.getElementById("kelas-huruf")?.value || "A";
+  const kelasLabel = `${State.jenjang} ${tingkat}-${huruf}`;
+  return `${kelasLabel} | ${State.siswa} porsi | ${formatStampWaktu()}`;
+}
+
+function getStampRet() {
+  const selected = getSelectedPengambilan();
+  const kelasLabel = selected ? selected.kelas : "Kelas";
+  const kondisi = State.kondisi.toUpperCase();
+  return `${kelasLabel} | Kembali: ${State.ompreng} | ${kondisi} | ${formatStampWaktu()}`;
+}
+
+function updateCamLiveStamp() {
+  const el = document.getElementById("cam-live-stamp");
+  if (!el) return;
+  el.textContent = camMode === "ret" ? getStampRet() : getStampAmbil();
+}
+
+function stopCamStream() {
+  if (camStream) {
+    camStream.getTracks().forEach((t) => t.stop());
+    camStream = null;
+  }
+  const video = document.getElementById("cam-video");
+  if (video) video.srcObject = null;
+}
+
+function closeCamModal() {
+  stopCamStream();
+  const modal = document.getElementById("cam-modal");
+  if (modal) {
+    modal.hidden = true;
+    modal.setAttribute("aria-hidden", "true");
+  }
+  camMode = null;
+  document.body.classList.remove("cam-modal-open");
+}
+
+async function openCamModal(mode) {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showToast("Browser tidak mendukung kamera langsung");
+    document.getElementById("cam-input")?.click();
+    return;
+  }
+
+  camMode = mode;
+  const modal = document.getElementById("cam-modal");
+  const video = document.getElementById("cam-video");
+  const title = document.getElementById("cam-modal-title");
+  if (!modal || !video) return;
+
+  if (title) {
+    title.textContent =
+      mode === "ret" ? "Foto Bukti Pengembalian" : "Ambil Foto Bukti";
+  }
+  updateCamLiveStamp();
+
+  try {
+    stopCamStream();
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    });
+    video.srcObject = camStream;
+    await video.play();
+    modal.hidden = false;
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("cam-modal-open");
+  } catch (err) {
+    console.error(err);
+    camMode = null;
+    showToast("Tidak dapat mengakses kamera. Izinkan akses kamera di browser.");
+  }
 }
 
 function openCamera() {
-  document.getElementById("cam-input")?.click();
+  openCamModal("ambil");
 }
 
 function openCameraRet() {
-  document.getElementById("cam-ret-input")?.click();
+  openCamModal("ret");
+}
+
+function captureFromCamera() {
+  const video = document.getElementById("cam-video");
+  const btn = document.getElementById("cam-btn-capture");
+  if (!video?.videoWidth) {
+    showToast("Kamera belum siap");
+    return;
+  }
+
+  const mode = camMode;
+  const stampText = mode === "ret" ? getStampRet() : getStampAmbil();
+  if (btn) btn.disabled = true;
+
+  kompresiDariSumber(video, stampText, FOTO_MAX_W, FOTO_QUALITY, (dataURL) => {
+    if (btn) btn.disabled = false;
+    closeCamModal();
+    if (mode === "ret") applyFotoRet(dataURL, stampText);
+    else applyFotoAmbil(dataURL, stampText);
+  });
+}
+
+function applyFotoAmbil(dataURL, stampText) {
+  State.fotoDataURL = dataURL;
+  const zone = document.getElementById("cam-zone");
+  if (zone) {
+    zone.classList.add("done");
+    const label = zone.querySelector(".cam-label");
+    const hint = zone.querySelector(".cam-hint");
+    if (label) label.textContent = "Foto berhasil diambil";
+    if (hint) hint.textContent = "Klik untuk ganti foto";
+  }
+  const result = document.getElementById("foto-result");
+  if (result) {
+    result.style.display = "block";
+    document.getElementById("foto-preview").src = dataURL;
+    document.getElementById("foto-stamp").textContent = stampText;
+  }
+}
+
+function applyFotoRet(dataURL, stampText) {
+  State.fotoRetDataURL = dataURL;
+  const label = document.getElementById("cam-ret-label");
+  if (label) label.textContent = "Foto berhasil diambil";
+  const prev = document.getElementById("cam-ret-preview");
+  if (prev) {
+    prev.src = dataURL;
+    prev.style.display = "block";
+  }
 }
 
 function handleFoto(event) {
   const file = event.target.files[0];
   if (!file) return;
-
-  const tingkat = document.getElementById("kelas-tingkat")?.value || "10";
-  const huruf = document.getElementById("kelas-huruf")?.value || "X-A";
-  const kelasLabel = `${State.jenjang} ${tingkat}-${huruf}`;
-  const jumlah = State.siswa;
-  const waktu = new Date().toLocaleString("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+  const stampText = getStampAmbil();
+  kompresiFoto(file, stampText, FOTO_MAX_W, FOTO_QUALITY, (dataURL) => {
+    applyFotoAmbil(dataURL, stampText);
   });
-  const stampText = `${kelasLabel} | ${jumlah} porsi | ${waktu}`;
-
-  kompresiFoto(file, stampText, 900, 0.75, (dataURL) => {
-    State.fotoDataURL = dataURL;
-    const zone = document.getElementById("cam-zone");
-    if (zone) {
-      zone.classList.add("done");
-      const label = zone.querySelector(".cam-label");
-      const hint = zone.querySelector(".cam-hint");
-      if (label) label.textContent = "Foto berhasil diambil";
-      if (hint) hint.textContent = "Klik untuk ganti foto";
-    }
-
-    const result = document.getElementById("foto-result");
-    if (result) {
-      result.style.display = "block";
-      document.getElementById("foto-preview").src = dataURL;
-      document.getElementById("foto-stamp").textContent = stampText;
-    }
-  });
+  event.target.value = "";
 }
 
 function handleFotoRet(event) {
   const file = event.target.files[0];
   if (!file) return;
-
-  const selected = getSelectedPengambilan();
-  const kelasLabel = selected ? selected.kelas : "Kelas";
-  const kondisi = State.kondisi.toUpperCase();
-  const waktu = new Date().toLocaleString("id-ID", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
+  const stampText = getStampRet();
+  kompresiFoto(file, stampText, FOTO_MAX_W, FOTO_QUALITY, (dataURL) => {
+    applyFotoRet(dataURL, stampText);
   });
-  const stampText = `${kelasLabel} | Kembali: ${State.ompreng} | ${kondisi} | ${waktu}`;
-
-  kompresiFoto(file, stampText, 900, 0.75, (dataURL) => {
-    State.fotoRetDataURL = dataURL;
-    document.getElementById("cam-ret-label").textContent =
-      "Foto berhasil diambil";
-    const prev = document.getElementById("cam-ret-preview");
-    if (prev) {
-      prev.src = dataURL;
-      prev.style.display = "block";
-    }
-  });
+  event.target.value = "";
 }
 
 function handleDok(event) {
@@ -609,26 +1097,36 @@ function handleDok(event) {
   document.getElementById("dok-label").textContent = file.name;
 }
 
+function gambarStempel(ctx, canvas, stampText) {
+  const fh = Math.max(13, Math.round(canvas.width / 42));
+  const barH = fh + 18;
+  ctx.fillStyle = "rgba(13,71,161,0.85)";
+  ctx.fillRect(0, canvas.height - barH, canvas.width, barH);
+  ctx.fillStyle = "#fff";
+  ctx.font = `bold ${fh}px "Plus Jakarta Sans", "Segoe UI", sans-serif`;
+  ctx.fillText(stampText, 10, canvas.height - 8);
+}
+
+function kompresiDariSumber(source, stampText, maxW, quality, callback) {
+  const w = source.videoWidth || source.naturalWidth || source.width;
+  const h = source.videoHeight || source.naturalHeight || source.height;
+  if (!w || !h) return;
+  const scale = Math.min(1, maxW / w);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(w * scale);
+  canvas.height = Math.round(h * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+  gambarStempel(ctx, canvas, stampText);
+  callback(canvas.toDataURL("image/jpeg", quality));
+}
+
 function kompresiFoto(file, stampText, maxW, quality, callback) {
   const reader = new FileReader();
   reader.onload = (ev) => {
     const img = new Image();
-    img.onload = () => {
-      const scale = Math.min(1, maxW / img.width);
-      const canvas = document.createElement("canvas");
-      canvas.width = Math.round(img.width * scale);
-      canvas.height = Math.round(img.height * scale);
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const fh = Math.max(13, Math.round(canvas.width / 42));
-      const barH = fh + 18;
-      ctx.fillStyle = "rgba(13,71,161,0.85)";
-      ctx.fillRect(0, canvas.height - barH, canvas.width, barH);
-      ctx.fillStyle = "#fff";
-      ctx.font = `bold ${fh}px "Plus Jakarta Sans", "Segoe UI", sans-serif`;
-      ctx.fillText(stampText, 10, canvas.height - 8);
-      callback(canvas.toDataURL("image/jpeg", quality));
-    };
+    img.onload = () =>
+      kompresiDariSumber(img, stampText, maxW, quality, callback);
     img.src = ev.target.result;
   };
   reader.readAsDataURL(file);
@@ -663,19 +1161,22 @@ async function loadData() {
 
     const returnCounts = {};
     State.pengembalian.forEach((r) => {
-      const key = String(r.id_pengambilan);
-      returnCounts[key] = (returnCounts[key] || 0) + Number(r.jumlah_kembali);
+      const key = String(r.id_pengambilan || r.pengambilan_id || "");
+      returnCounts[key] =
+        (returnCounts[key] || 0) + Number(r.jumlah_kembali || 0);
     });
     State.pengambilan.forEach((r) => {
-      const key = String(r.id);
+      const key = String(r.id || "");
+      const jumlah = Number(r.jumlah_ambil ?? r.jumlah ?? 0);
       r.kembali = returnCounts[key] || 0;
-      r.statusKembali = r.kembali >= Number(r.jumlah_ambil || r.jumlah);
+      r.statusKembali = jumlah > 0 ? r.kembali >= jumlah : false;
     });
 
     populateRetOptions();
     refreshDashboard();
     renderPendingList();
     renderRekap();
+    await loadNotifications();
   } catch (err) {
     console.error(err);
     showToast("Gagal memuat data. Periksa koneksi ke server.");
@@ -687,7 +1188,7 @@ function populateRetOptions() {
   if (!sel) return;
   sel.innerHTML = '<option value="">— Pilih Kelas —</option>';
   const pending = State.pengambilan.filter(
-    (r) => !r.statusKembali && Number(r.jumlah_ambil || r.jumlah) > 0,
+    (r) => Number(r.jumlah_ambil ?? r.jumlah ?? 0) > Number(r.kembali ?? 0),
   );
   pending.forEach((r) => {
     const opt = document.createElement("option");
@@ -729,8 +1230,8 @@ async function submitPengambilan() {
 
 function resetFormPengambilan() {
   State.fotoDataURL = null;
-  State.siswa = 32;
-  document.getElementById("cnt-siswa").textContent = 32;
+  State.siswa = 36;
+  document.getElementById("cnt-siswa").textContent = 36;
   document.getElementById("foto-result").style.display = "none";
   document.getElementById("foto-preview").src = "";
   document.getElementById("cam-input").value = "";
@@ -785,11 +1286,20 @@ async function submitPengembalian() {
 
 function refreshDashboard() {
   const totalPorsi = State.pengambilan.reduce(
-    (sum, r) => sum + Number(r.jumlah_ambil || r.jumlah || 0),
+    (sum, r) => sum + Number(r.jumlah_ambil ?? r.jumlah ?? 0),
     0,
   );
   const kelasSudah = State.pengambilan.length;
-  const belumKembali = State.pengambilan.filter((r) => !r.statusKembali).length;
+  const pendingClasses = State.pengambilan.filter(
+    (r) => Number(r.jumlah_ambil ?? r.jumlah ?? 0) > Number(r.kembali ?? 0),
+  );
+  const belumKembali = pendingClasses.length;
+  // Total pending quantity (sum of remaining ompreng per class)
+  const pendingQty = State.pengambilan.reduce((sum, r) => {
+    const jumlah = Number(r.jumlah_ambil ?? r.jumlah ?? 0);
+    const kembali = Number(r.kembali ?? 0);
+    return sum + Math.max(0, jumlah - kembali);
+  }, 0);
   const totalRet = State.pengembalian.reduce(
     (sum, r) => sum + Number(r.jumlah_kembali || 0),
     0,
@@ -799,8 +1309,11 @@ function refreshDashboard() {
   safeSet("s-total", totalPorsi);
   safeSet("s-kelas", kelasSudah);
   safeSet("s-kelas-sub", `dari ${kelasSudah} kelas tercatat`);
-  safeSet("s-belum", belumKembali);
-  safeSet("topbar-notif", belumKembali);
+  // Sidebar badges and topbar — show quantities (total pending ompreng)
+  safeSet("badge-pengambilan", kelasSudah);
+  safeSet("badge-pengembalian", pendingQty);
+  safeSet("s-belum", pendingQty);
+  safeSet("topbar-notif", pendingQty);
   safeSet("prog-pct", `${pct}%`);
 
   updateNotifPanelContent();
@@ -874,19 +1387,22 @@ function renderPendingList() {
     return;
   }
   container.innerHTML = pending
-    .map(
-      (r) => `
+    .map((r) => {
+      const jumlah = Number(r.jumlah_ambil || r.jumlah || 0);
+      const kembali = Number(r.kembali || 0);
+      const sisa = Math.max(0, jumlah - kembali);
+      return `
     <div class="pending-card">
       <div class="pending-icon">
         <svg viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
       </div>
       <div class="pending-info">
         <div class="pending-name">${r.kelas}</div>
-        <div class="pending-meta">${r.jumlah_ambil || r.jumlah} ompreng belum kembali · Diambil ${formatTime(r.created_at || r.tanggal || "")}</div>
+        <div class="pending-meta">${sisa} ompreng belum kembali · Diambil ${formatTime(r.created_at || r.tanggal || "")}</div>
       </div>
       <button class="pending-action" onclick="quickRet('${r.id}')">Catat Kembali</button>
-    </div>`,
-    )
+    </div>`;
+    })
     .join("");
 }
 
@@ -923,7 +1439,6 @@ async function renderRekap() {
 
     const summaryEl = document.getElementById("rekap-summary");
     const tbody = document.getElementById("rekap-tbody");
-    const gallery = document.getElementById("foto-gallery");
     if (!summaryEl || !tbody) return;
 
     if (ambilData.status === "error" || kembaliData.status === "error") {
@@ -943,46 +1458,47 @@ async function renderRekap() {
       <div class="sum-chip"><strong>${kembaliData.data?.length || 0}</strong> Pengembalian</div>
       <div class="sum-chip"><strong>${pct}%</strong> Tingkat Pengembalian</div>`;
 
-    const returnCounts = {};
+    const returnMap = {};
     (kembaliData.data || []).forEach((r) => {
       const key = String(r.id_pengambilan || r.pengambilan_id || "");
       if (!key) return;
-      returnCounts[key] =
-        (returnCounts[key] || 0) + Number(r.jumlah_kembali || 0);
+      returnMap[key] = r;
     });
 
     const rows = [];
-    if (jenis !== "pengembalian") {
-      (ambilData.data || []).forEach((r) => {
-        const kembali = returnCounts[String(r.id)] || 0;
-        const jumlah = Number(r.jumlah || r.jumlah_ambil || 0);
-        const foto = r.foto ? `uploads/foto/${r.foto}` : "";
-        rows.push({
-          waktu: r.created_at || r.tanggal || "",
-          jenis: "Pengambilan",
-          label: r.kelas,
-          jumlah: `${jumlah} porsi`,
-          status:
-            kembali >= jumlah && jumlah > 0
-              ? '<span class="badge badge-green">Lengkap</span>'
-              : '<span class="badge badge-orange">Belum Kembali</span>',
-          foto,
-        });
+    (ambilData.data || []).forEach((r) => {
+      const kembali = returnMap[String(r.id)] || null;
+      if (jenis === "pengembalian" && !kembali) return;
+
+      const jumlah = Number(r.jumlah || r.jumlah_ambil || 0);
+      const foto = kembali?.foto
+        ? `uploads/foto/${kembali.foto}`
+        : r.foto
+          ? `uploads/foto/${r.foto}`
+          : "";
+      const kondisi = kembali?.kondisi || "belum kembali";
+      const kondisiLabel =
+        kondisi === "belum kembali"
+          ? "Belum Kembali"
+          : kondisi.charAt(0).toUpperCase() + kondisi.slice(1);
+      const badgeClass = kembali
+        ? kondisi === "baik"
+          ? "badge-blue"
+          : kondisi === "kotor"
+            ? "badge-orange"
+            : kondisi === "rusak"
+              ? "badge-red"
+              : "badge-blue"
+        : "badge-orange";
+      rows.push({
+        waktu: r.created_at || r.tanggal || "",
+        jenis: kembali ? "Pengembalian" : "Pengambilan",
+        label: r.kelas || r.kelas_ambil || "",
+        jumlah: `${jumlah} porsi`,
+        status: `<span class="badge ${badgeClass}">${kondisiLabel}</span>`,
+        foto,
       });
-    }
-    if (jenis !== "pengambilan") {
-      (kembaliData.data || []).forEach((r) => {
-        const foto = r.foto ? `uploads/foto/${r.foto}` : "";
-        rows.push({
-          waktu: r.created_at || r.tanggal || "",
-          jenis: "Pengembalian",
-          label: r.kelas,
-          jumlah: `${r.jumlah_kembali} ompreng`,
-          status: `<span class="badge badge-blue">${r.kondisi}</span>`,
-          foto,
-        });
-      });
-    }
+    });
 
     if (!rows.length) {
       tbody.innerHTML =
@@ -997,48 +1513,46 @@ async function renderRekap() {
           <td>${r.label}</td>
           <td class="rekap-jumlah">${r.jumlah}</td>
           <td>${r.status}</td>
-          <td>${r.foto ? `<img src="${r.foto}" style="width:48px;height:36px;object-fit:cover;border-radius:6px;cursor:pointer" onclick="openLightboxSrc('${r.label.replace(/'/g, "\'")}', '${r.foto}')">` : "—"}</td>
+          <td>${
+            r.foto
+              ? `<button type="button" class="rekap-foto-btn" data-foto="${escapeAttr(r.foto)}" title="Perbesar foto" aria-label="Perbesar foto bukti">
+                  <img src="${escapeAttr(r.foto)}" alt="Foto bukti" class="rekap-foto-thumb" loading="lazy">
+                </button>`
+              : "—"
+          }</td>
         </tr>`,
         )
         .join("");
     }
-
-    if (!gallery) return;
-    const fotoRows = (ambilData.data || [])
-      .filter((r) => r.foto)
-      .map((r) => ({
-        kelas: r.kelas,
-        foto: `uploads/foto/${r.foto}`,
-        jumlah: r.jumlah || r.jumlah_ambil,
-      }));
-    if (!fotoRows.length) {
-      gallery.innerHTML = "";
-      return;
-    }
-    gallery.innerHTML = `
-      <h3 style="font-size:14px;font-weight:700;color:#1A2744;margin:16px 0 10px">Galeri Foto Bukti</h3>
-      ${fotoRows
-        .map(
-          (r) => `
-        <div class="foto-thumb" onclick="openLightboxSrc('${r.kelas.replace(/'/g, "\'")}', '${r.foto}')">
-          <img src="${r.foto}" alt="${r.kelas}">
-          <div class="foto-thumb-label">${r.kelas} · ${r.jumlah} porsi</div>
-        </div>`,
-        )
-        .join("")}`;
   } catch (err) {
     console.error(err);
     showToast("Gagal memuat rekap.");
   }
 }
 
-function openLightboxSrc(label, src) {
-  document.getElementById("lightbox-img").src = src;
-  document.getElementById("lightbox").classList.add("show");
+function escapeAttr(str) {
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;");
+}
+
+function openLightbox(src) {
+  const img = document.getElementById("lightbox-img");
+  const box = document.getElementById("lightbox");
+  if (!img || !box || !src) return;
+  img.src = src;
+  img.alt = "Foto bukti";
+  box.classList.add("open");
+  document.body.classList.add("lightbox-open");
 }
 
 function closeLightbox() {
-  document.getElementById("lightbox")?.classList.remove("show");
+  const box = document.getElementById("lightbox");
+  const img = document.getElementById("lightbox-img");
+  box?.classList.remove("open");
+  document.body.classList.remove("lightbox-open");
+  if (img) img.src = "";
 }
 
 async function kirimKeBackend(endpoint, data) {
@@ -1077,25 +1591,6 @@ function toggleNotifPanel(ev) {
   if (!panel) return;
   const open = panel.classList.toggle("open");
   btn?.setAttribute("aria-expanded", open ? "true" : "false");
-}
-
-function updateNotifPanelContent() {
-  const body = document.getElementById("notif-dropdown-body");
-  if (!body) return;
-  const pending = State.pengambilan.filter(
-    (r) => !r.statusKembali && Number(r.jumlah_ambil || r.jumlah || 0) > 0,
-  );
-  if (!pending.length) {
-    body.innerHTML =
-      '<p class="notif-empty">Belum ada daftar kelas yang menunggu. Angka pada lonceng adalah jumlah kelas yang omprengnya belum dikembalikan hari ini.</p>';
-    return;
-  }
-  body.innerHTML = `<ul class="notif-list">${pending
-    .map(
-      (r) =>
-        `<li><strong>${escapeHtml(r.kelas)}</strong> — ompreng belum dikembalikan (${Number(r.jumlah_ambil || r.jumlah)} porsi)</li>`,
-    )
-    .join("")}</ul>`;
 }
 
 function safeSet(id, val) {
@@ -1169,11 +1664,10 @@ async function loadCharts() {
     ...barDatasets,
     {
       type: "line",
-      label: "% pengembalian vs porsi ambil",
-      data: hariRingkas.map((h) => Number(h.persen_kembali ?? 0)),
-      yAxisID: "y1",
+      label: "Porsi pengembalian",
+      data: hariRingkas.map((h) => Number(h.total_kembali ?? 0)),
       borderColor: "#f59e0b",
-      backgroundColor: "rgba(245, 158, 11, 0.06)",
+      backgroundColor: "rgba(245, 158, 11, 0.08)",
       borderWidth: 2,
       tension: 0.35,
       fill: false,
@@ -1216,25 +1710,8 @@ async function loadCharts() {
           grid: { color: grid },
           title: {
             display: true,
-            text: "Porsi pengambilan (per tingkat & jurusan)",
+            text: "Porsi ambil & pengembalian",
             color: font,
-            font: { size: 11, weight: "600" },
-          },
-        },
-        y1: {
-          position: "right",
-          beginAtZero: true,
-          max: maxPersenAxis,
-          ticks: {
-            color: "#f59e0b",
-            font: { size: 11 },
-            callback: (v) => `${v}%`,
-          },
-          grid: { drawOnChartArea: false },
-          title: {
-            display: true,
-            text: "% ompreng dikembalikan ÷ porsi ambil",
-            color: "#f59e0b",
             font: { size: 11, weight: "600" },
           },
         },
@@ -1423,7 +1900,35 @@ async function tampilkanFeedbackQuizHarian(ringkasanSkor) {
   }
 }
 
+async function deleteNotification(id) {
+  if (!confirm("Hapus notifikasi ini?")) return;
+  try {
+    const res = await fetch("api/notifikasi.php", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ action: "delete", id }),
+    });
+    const j = await parseApiJson(res);
+    if (j.status === "ok") {
+      await loadNotifications();
+      showToast(j.pesan || "Notifikasi dihapus");
+    } else {
+      showToast(j.pesan || "Gagal menghapus notifikasi");
+    }
+  } catch (_) {
+    showToast("Gagal menghapus notifikasi");
+  }
+}
+
 async function kirimSaran() {
+  const role = window.SIAP_USER?.role || "";
+  if (!["perwakilan_kelas", "petugas_mbg"].includes(role)) {
+    showToast(
+      "Hanya perwakilan kelas dan petugas MBG yang dapat mengirim masukan.",
+    );
+    return;
+  }
   const jenis = document.getElementById("saran-jenis")?.value || "saran_menu";
   const isi = document.getElementById("saran-isi")?.value?.trim() || "";
   if (isi.length < 5) {
@@ -1439,7 +1944,11 @@ async function kirimSaran() {
     });
     const j = await parseApiJson(res);
     showToast(j.pesan || (j.status === "ok" ? "Terkirim" : "Gagal"));
-    if (j.status === "ok") document.getElementById("saran-isi").value = "";
+    if (j.status === "ok") {
+      document.getElementById("saran-isi").value = "";
+      loadNotifications();
+      renderMasukanPage();
+    }
   } catch (_) {
     showToast("Gagal mengirim");
   }

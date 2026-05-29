@@ -121,7 +121,6 @@ function persenPengembalian($kembali, $ambil) {
     if ($ambil == 0) return 0;
     return round(($kembali / $ambil) * 100, 1);
 }
-
 // ============================================================
 // AJAX API HANDLER
 // ============================================================
@@ -344,9 +343,22 @@ if ($authRequired && !empty($_SESSION['user_id'])) {
     }
 }
 $showApp = !$authRequired || $currentUser;
+
+// ===== TOMBOL WHATSAPP MENGAMBANG — GANTI DI SINI =====
+// File: index.php (sekitar baris 348–355)
+// Ubah $wa_phone: nomor WhatsApp (kode negara + nomor, tanpa +, spasi, atau strip).
+// Contoh Indonesia: 6281234567890 untuk +62 812-3456-7890
+// Opsional: $wa_message = teks awal chat (kosongkan '' jika tidak perlu).
+$wa_phone = '6285600186870';
+$wa_message = 'Halo, saya butuh bantuan terkait MBGue Bang dims.';
+$wa_phone_digits = preg_replace('/\D/', '', $wa_phone);
+$wa_url = 'https://wa.me/' . $wa_phone_digits;
+if ($wa_message !== '') {
+    $wa_url .= '?text=' . rawurlencode($wa_message);
+}
 ?>
 <!DOCTYPE html>
-<html lang="id" data-theme="light">
+<html lang="id" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -359,26 +371,46 @@ $showApp = !$authRequired || $currentUser;
 <body class="<?php echo $showApp ? '' : 'auth-body'; ?>">
 <div class="toast" id="toast"></div>
 
+<!-- Tombol WhatsApp mengambang — URL dari konfigurasi ~baris 348 index.php -->
+<a
+  href="<?php echo htmlspecialchars($wa_url, ENT_QUOTES, 'UTF-8'); ?>"
+  class="wa-float"
+  target="_blank"
+  rel="noopener noreferrer"
+  aria-label="Hubungi kami via WhatsApp"
+  title="Chat WhatsApp"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.435 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
+</a>
+
 <?php if (!$showApp): ?>
 
 <div class="auth-layout" id="auth-root">
-  <div class="auth-visual" aria-hidden="true">
-    <div class="auth-visual-inner">
-      <div class="auth-orbs"><span></span><span></span><span></span></div>
-      <div class="auth-quote">
-        <strong>MBGue Nih!</strong>
-        <p>Catat distribusi dengan nyaman — perwakilan kelas, petugas MBG, hingga tim dapur SPPG.</p>
-      </div>
+
+  <!-- LEFT: Hero Brand Panel -->
+  <div class="auth-hero">
+    <div class="auth-hero-deco" aria-hidden="true">
+      <span class="auth-deco-ring r1"></span>
+      <span class="auth-deco-ring r2"></span>
+      <span class="auth-deco-ring r3"></span>
     </div>
+    <div class="auth-hero-body">
+      <div class="auth-hero-icon">
+        <svg viewBox="0 0 24 24" fill="white" width="30" height="30"><path d="M18.5 8.5l-1.5-.5C16 6 14 5 12 5c-4 0-7 3-7 7s3 7 7 7c2.9 0 5.4-1.8 6.5-4.4l.5-1.1V12c0-.5-.1-1-.2-1.5zM12 17c-2.8 0-5-2.2-5-5s2.2-5 5-5c1.9 0 3.5 1 4.4 2.5L12 11V7l-4 4 4 4v-2.9l3.3-1.7c.1.5.2 1 .2 1.6 0 2.8-2.2 5-5 5z"/></svg>
+      </div>
+      <h1 class="auth-hero-title">Halo,<br>MBGue!</h1>
+      <p class="auth-hero-desc">Catat distribusi makanan bergizi gratis dengan nyaman — untuk perwakilan kelas, petugas MBG, hingga tim dapur SPPG.</p>
+    </div>
+    <p class="auth-hero-copy">© 2025 MBGue · SMKN 1 Bangsri. All rights reserved.</p>
   </div>
+
+  <!-- RIGHT: Form Panel -->
   <div class="auth-panel-wrap">
-    <div class="auth-panel glass-panel">
-      <div class="auth-brand-inline">
-        <span class="auth-logo-dot"></span>
-        <div>
-          <div class="auth-brand-title">MBGue</div>
-          <div class="auth-brand-sub">Masuk atau daftar untuk melanjutkan</div>
-        </div>
+    <div class="auth-panel">
+
+      <div class="auth-welcome" id="auth-welcome">
+        <h2 class="auth-welcome-title" id="auth-welcome-title">Selamat Datang Kembali!</h2>
+        <p class="auth-welcome-sub" id="auth-welcome-sub">Masuk ke akun Anda untuk melanjutkan</p>
       </div>
 
       <div class="auth-tabs" role="tablist">
@@ -396,11 +428,10 @@ $showApp = !$authRequired || $currentUser;
           <input type="password" name="password" id="login-password" required placeholder=" " minlength="8">
           <span>Kata sandi</span>
         </label>
-        <button type="submit" class="auth-submit ripple-btn">
-          <span>Masuk</span>
-          <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8-8-8z"/></svg>
+        <button type="submit" class="auth-submit">
+          <span>Masuk Sekarang</span>
         </button>
-        <p class="auth-hint">Tips: gunakan kata sandi yang mudah diingat namun tidak dipublikasikan.</p>
+        <p class="auth-bottom-link">Belum punya akun? <button type="button" class="auth-switch-link" onclick="setAuthTab('register')">Daftar sekarang</button></p>
       </form>
 
       <form id="form-register" class="auth-form" method="POST" action="api/auth.php" onsubmit="submitRegister(event); return false;" autocomplete="on">
@@ -429,9 +460,10 @@ $showApp = !$authRequired || $currentUser;
           <input type="text" name="kelas_info" id="reg-kelas" placeholder=" " maxlength="120">
           <span>Kelas / jurusan yang diwakili</span>
         </label>
-        <button type="submit" class="auth-submit ripple-btn accent-soft">
-          <span>Buat akun</span>
+        <button type="submit" class="auth-submit accent-soft">
+          <span>Buat Akun</span>
         </button>
+        <p class="auth-bottom-link">Sudah punya akun? <button type="button" class="auth-switch-link" onclick="setAuthTab('login')">Masuk sekarang</button></p>
       </form>
 
       <?php if (!$authDb): ?>
@@ -439,6 +471,7 @@ $showApp = !$authRequired || $currentUser;
       <?php endif; ?>
     </div>
   </div>
+
 </div>
 
 <script src="assets/app.js"></script>
@@ -447,11 +480,13 @@ $showApp = !$authRequired || $currentUser;
 
 <div class="shell" id="shell">
 
+  <div class="sb-edge-trigger" id="sb-edge-trigger" aria-hidden="true"></div>
+
   <!-- SIDEBAR OVERLAY (mobile) -->
   <div class="overlay" id="overlay" onclick="closeSidebar()"></div>
 
   <!-- SIDEBAR -->
-  <aside class="sidebar" id="sidebar">
+  <aside class="sidebar collapsed" id="sidebar">
     <div class="sb-brand">
       <div class="sb-brand-icon">
         <svg viewBox="0 0 24 24" fill="white"><path d="M18.5 8.5l-1.5-.5C16 6 14 5 12 5c-4 0-7 3-7 7s3 7 7 7c2.9 0 5.4-1.8 6.5-4.4l.5-1.1V12c0-.5-.1-1-.2-1.5zM12 17c-2.8 0-5-2.2-5-5s2.2-5 5-5c1.9 0 3.5 1 4.4 2.5L12 11V7l-4 4 4 4v-2.9l3.3-1.7c.1.5.2 1 .2 1.6 0 2.8-2.2 5-5 5z"/></svg>
@@ -532,19 +567,14 @@ $showApp = !$authRequired || $currentUser;
 
     <!-- TOPBAR -->
     <header class="topbar" id="topbar">
-      <button class="burger" id="burger" onclick="toggleSidebar()" aria-label="Menu">
-        <span class="burger-line"></span>
-        <span class="burger-line"></span>
-        <span class="burger-line"></span>
-      </button>
       <div class="topbar-center">
         <h1 class="topbar-title" id="topbar-title">Dashboard</h1>
         <span class="topbar-sub" id="topbar-sub">Selamat datang di MBGue</span>
       </div>
       <div class="topbar-actions">
-        <button type="button" class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Ganti tema">
-          <span class="theme-toggle-track"><span class="theme-toggle-knob"></span></span>
-          <span class="theme-toggle-label" id="theme-toggle-label">Terang</span>
+        <button type="button" class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Mode terang" aria-label="Mode terang">
+          <svg class="theme-toggle-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><path d="M6.76 4.84l-1.8-1.79-1.41 1.41 1.79 1.8 1.42-1.42zM4 10.5H1v2h3v-2zm10-7.5h-2v3h2v-3zm7.44 3.13l-1.41-1.41-1.79 1.79 1.41 1.41 1.79-1.79zm-1.8 12.71l1.79 1.8 1.41-1.41-1.8-1.79-1.4 1.4zM20 10.5v2h3v-2h-3zm-8 9.5c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6zm-6.5 2.5c-1.38 0-2.5-1.12-2.5-2.5S4.12 17 5.5 17 8 18.12 8 19.5 6.88 22 5.5 22zm0-17C4.12 5 3 3.88 3 2.5S4.12 0 5.5 0 8 1.12 8 2.5 6.88 5 5.5 5z"/></svg>
+          <svg class="theme-toggle-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.37 5.51A7 7 0 1018.63 14.49 9 9 0 119.37 5.51z"/></svg>
         </button>
         <div class="topbar-notif-slot">
           <button type="button" class="topbar-badge-wrap" id="notif-toggle" title="Notifikasi — ompreng belum kembali" onclick="toggleNotifPanel(event)" aria-expanded="false" aria-haspopup="true" aria-controls="notif-dropdown">
@@ -668,7 +698,7 @@ $showApp = !$authRequired || $currentUser;
                   <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
                 </button>
                 <div class="cnt-display">
-                  <span class="cnt-num" id="cnt-siswa">32</span>
+                  <span class="cnt-num" id="cnt-siswa">36</span>
                   <span class="cnt-label-small">siswa</span>
                 </div>
                 <button class="cnt-btn" onclick="adjSiswa(1)">
@@ -678,7 +708,7 @@ $showApp = !$authRequired || $currentUser;
             </div>
             <div class="math-inline" id="math-inline">
               <div class="math-row">
-                <span>Kelas <strong id="mi-kelas">7-A</strong> → <strong id="mi-siswa">32</strong> porsi MBG</span>
+                <span>Kelas <strong id="mi-kelas">7-A</strong> → <strong id="mi-siswa">36</strong> porsi MBG</span>
               </div>
               <div class="math-row">
                 <span>Estimasi berat: <strong id="mi-berat">16</strong> kg</span>
@@ -702,8 +732,7 @@ $showApp = !$authRequired || $currentUser;
               <p class="cam-label">Buka Kamera</p>
               <span class="cam-hint">Foto langsung dikompres &amp; diberi stempel</span>
             </div>
-            <input type="file" id="cam-input" accept="image/*" capture="environment" onchange="handleFoto(event)">
-            <canvas id="cam-canvas" style="display:none"></canvas>
+            <input type="file" id="cam-input" accept="image/*" capture="environment" class="sr-only" tabindex="-1" aria-hidden="true" onchange="handleFoto(event)">
             <div class="foto-result" id="foto-result" style="display:none">
               <img id="foto-preview" alt="Preview foto">
               <div class="foto-stamp" id="foto-stamp"></div>
@@ -741,21 +770,21 @@ $showApp = !$authRequired || $currentUser;
           <div class="field-group">
             <label class="field-label">Kondisi Ompreng</label>
             <div class="kondisi-opts">
-              <label class="kondisi-opt" onclick="selectKondisi('baik', this)">
+              <label class="kondisi-opt selected" data-kondisi="baik" onclick="selectKondisi('baik', this)">
                 <div class="kondisi-check active" data-val="baik"></div>
                 <div>
                   <strong>Baik &amp; Bersih</strong>
                   <span>Tidak ada kerusakan</span>
                 </div>
               </label>
-              <label class="kondisi-opt" onclick="selectKondisi('kotor', this)">
+              <label class="kondisi-opt" data-kondisi="kotor" onclick="selectKondisi('kotor', this)">
                 <div class="kondisi-check" data-val="kotor"></div>
                 <div>
                   <strong>Ada Sisa Makanan</strong>
                   <span>Perlu dibersihkan</span>
                 </div>
               </label>
-              <label class="kondisi-opt" onclick="selectKondisi('rusak', this)">
+              <label class="kondisi-opt" data-kondisi="rusak" onclick="selectKondisi('rusak', this)">
                 <div class="kondisi-check" data-val="rusak"></div>
                 <div>
                   <strong>Rusak / Hilang</strong>
@@ -771,7 +800,7 @@ $showApp = !$authRequired || $currentUser;
                 <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
               </button>
               <div class="cnt-display">
-                <span class="cnt-num" id="cnt-ompreng">32</span>
+                <span class="cnt-num" id="cnt-ompreng">36</span>
                 <span class="cnt-label-small">ompreng</span>
               </div>
               <button class="cnt-btn" onclick="adjOmpreng(1)">
@@ -841,7 +870,13 @@ $showApp = !$authRequired || $currentUser;
           </table>
         </div>
 
-        <div class="foto-gallery" id="foto-gallery"></div>
+        <?php if (($currentUser['role'] ?? '') === 'petugas_mbg'): ?>
+        <div style="margin-top: 16px; text-align: right;">
+          <button type="button" class="btn-filter" onclick="clearRekapHistory()">
+            Bersihkan riwayat
+          </button>
+        </div>
+        <?php endif; ?>
       </section>
 
       <!-- QUIZ TEBAK MENU -->
@@ -877,11 +912,13 @@ $showApp = !$authRequired || $currentUser;
       <section class="page" id="page-saran">
         <div class="page-header">
           <div>
-            <h2 class="page-title">Saran menu &amp; kritik</h2>
-            <p class="page-desc">Bagikan ide menu atau masukan agar program MBG makin baik</p>
+            <h2 class="page-title">Masukan</h2>
+            <p class="page-desc">Kumpulan saran dan kritik yang dikirim oleh perwakilan kelas dan petugas MBG untuk Dapur SPPG. Daftar ini hanya dapat dilihat dan ditindaklanjuti oleh Dapur SPPG.</p>
           </div>
         </div>
+      <?php if (($currentUser['role'] ?? '') !== 'dapur_sppg'): ?>
         <div class="form-card engage-card saran-form-panel">
+          <p id="saran-access-note" style="margin-bottom:12px; color:#555; font-size:0.95rem;"></p>
           <div class="field-group">
             <label class="field-label">Jenis masukan</label>
             <select class="f-input" id="saran-jenis">
@@ -895,6 +932,30 @@ $showApp = !$authRequired || $currentUser;
             <textarea class="f-input f-textarea" id="saran-isi" rows="5" placeholder="Tulis dengan sopan dan jelas…"></textarea>
           </div>
           <button type="button" class="btn-submit" onclick="kirimSaran()">Kirim masukan</button>
+        </div>
+      <?php endif; ?>
+
+        <div class="form-card engage-card" style="margin-top:16px">
+          <h3 class="form-section-title">Daftar Masukan</h3>
+          <div class="admin-table-wrap" style="margin-top:12px">
+            <table class="admin-table" id="tbl-masukan">
+              <thead>
+                <tr>
+                  <th>Waktu</th>
+                  <th>Pengirim</th>
+                  <th>Jenis</th>
+                  <th>Status</th>
+                  <th>Isi</th>
+                  <th>Feedback</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="masukan-actions" style="margin-top:12px; padding-top:12px; border-top:1px solid var(--card-border)">
+            <button type="button" class="btn-filter btn-danger" id="btn-hapus-riwayat" onclick="clearMasukanHistory()" title="Hapus semua riwayat masukan">Hapus Riwayat</button>
+          </div>
         </div>
       </section>
 
@@ -969,9 +1030,32 @@ $showApp = !$authRequired || $currentUser;
     </div>
   </main>
 
+  <!-- KAMERA LANGSUNG -->
+  <div class="cam-modal" id="cam-modal" hidden aria-hidden="true">
+    <div class="cam-modal-backdrop" onclick="closeCamModal()"></div>
+    <div class="cam-modal-panel" role="dialog" aria-labelledby="cam-modal-title" aria-modal="true">
+      <div class="cam-modal-head">
+        <h3 id="cam-modal-title">Ambil Foto Bukti</h3>
+        <button type="button" class="cam-modal-close" onclick="closeCamModal()" aria-label="Tutup">&times;</button>
+      </div>
+      <div class="cam-viewport">
+        <video id="cam-video" autoplay playsinline muted></video>
+        <p class="cam-live-stamp" id="cam-live-stamp"></p>
+      </div>
+      <p class="cam-modal-hint">Foto otomatis dikompres &amp; distempel setelah diambil</p>
+      <div class="cam-modal-actions">
+        <button type="button" class="cam-btn cam-btn-cancel" onclick="closeCamModal()">Batal</button>
+        <button type="button" class="cam-btn cam-btn-capture" id="cam-btn-capture" onclick="captureFromCamera()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 17.5A5.5 5.5 0 1112 6.5a5.5 5.5 0 010 11zm0-2a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM20 5h-2.83L15 3H9L6.83 5H4a2 2 0 00-2 2v11a2 2 0 002 2h16a2 2 0 002-2V7a2 2 0 00-2-2z"/></svg>
+          Ambil Foto
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- FOTO LIGHTBOX -->
   <div class="lightbox" id="lightbox" onclick="closeLightbox()">
-    <img id="lightbox-img" alt="">
+    <img id="lightbox-img" alt="" onclick="event.stopPropagation()">
   </div>
 
 </div>
@@ -980,6 +1064,15 @@ $showApp = !$authRequired || $currentUser;
 <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <script>
 window.SIAP_USER = <?php echo json_encode($currentUser, JSON_UNESCAPED_UNICODE); ?>;
+
+// Fallback ke localStorage jika session tidak tersedia (untuk cross-port access)
+if (!window.SIAP_USER && localStorage.getItem("mbg_user_cache")) {
+  try {
+    window.SIAP_USER = JSON.parse(localStorage.getItem("mbg_user_cache"));
+  } catch (e) {
+    console.warn("Failed to parse cached user:", e);
+  }
+}
 </script>
 <script src="assets/app.js"></script>
 

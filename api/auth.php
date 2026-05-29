@@ -120,16 +120,20 @@ if ($action === 'register') {
         $stmt->execute([$email, $hash, $nama, $role, $kelasInfo]);
         $newId = (int) $pdo->lastInsertId();
     } catch (PDOException $e) {
+        error_log("Register DB error: " . $e->getMessage());
         if ((int) $e->getCode() === 23000) {
             http_response_code(409);
             echo json_encode(['status' => 'error', 'pesan' => 'Email sudah terdaftar']);
             exit;
         }
-        throw $e;
+        http_response_code(500);
+        echo json_encode(['status' => 'error', 'pesan' => 'Gagal menyimpan data: ' . $e->getMessage()]);
+        exit;
     }
 
     session_regenerate_id(true);
     $_SESSION['user_id'] = $newId;
+    session_write_close();
 
     echo json_encode([
         'status' => 'ok',
@@ -166,6 +170,7 @@ if ($action === 'login') {
     }
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int) $row['id'];
+    session_write_close();
 
     unset($row['password_hash']);
     echo json_encode([
