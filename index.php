@@ -1,6 +1,11 @@
 <?php
 require_once __DIR__ . '/config/session_bootstrap.php';
 
+// Force browser to always load fresh HTML and JS/CSS after code changes.
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+
 // ============================================================
 // SIAP-MBG — Sistem Informasi Administrasi Program MBG
 // Single-file PHP + HTML + CSS + JS
@@ -11,6 +16,15 @@ define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
 define('DB_PASS', '12345');
 define('DB_NAME', 'siapp_mbg');
+
+// Jika aplikasi dijalankan di subfolder, pastikan semua path relatif menggunakan base path yang benar.
+$appBaseUrl = rtrim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
+if ($appBaseUrl === '') {
+    $appBaseUrl = '/';
+} else {
+    $appBaseUrl .= '/';
+}
+$assetVersion = @filemtime(__DIR__ . '/assets/app.js') ?: time();
 
 function getDB() {
     static $pdo = null;
@@ -362,11 +376,12 @@ if ($wa_message !== '') {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<base href="<?php echo htmlspecialchars($appBaseUrl, ENT_QUOTES, 'UTF-8'); ?>">
 <title>MBGue — Program Makan Bergizi Gratis</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/style.css?v=<?php echo $assetVersion; ?>">
 </head>
 <body class="<?php echo $showApp ? '' : 'auth-body'; ?>">
 <div class="toast" id="toast"></div>
@@ -1063,6 +1078,7 @@ if ($wa_message !== '') {
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <script>
+window.APP_BASE_URL = <?php echo json_encode($appBaseUrl, JSON_UNESCAPED_UNICODE); ?>;
 window.SIAP_USER = <?php echo json_encode($currentUser, JSON_UNESCAPED_UNICODE); ?>;
 
 // Fallback ke localStorage jika session tidak tersedia (untuk cross-port access)
@@ -1074,7 +1090,7 @@ if (!window.SIAP_USER && localStorage.getItem("mbg_user_cache")) {
   }
 }
 </script>
-<script src="assets/app.js"></script>
+<script src="assets/app.js?v=<?php echo $assetVersion; ?>"></script>
 
 <?php endif; ?>
 </body>

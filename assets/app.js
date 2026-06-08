@@ -22,7 +22,16 @@ let camMode = null;
 const FOTO_MAX_W = 900;
 const FOTO_QUALITY = 0.75;
 
-const fetchCred = { credentials: "same-origin" };
+const fetchCred = { credentials: "include" };
+const rawAppBaseUrl = document.querySelector("base")?.href || window.APP_BASE_URL || "./";
+const APP_BASE_URL = rawAppBaseUrl.match(/^https?:\/\//i)
+  ? rawAppBaseUrl
+  : new URL(rawAppBaseUrl, window.location.origin).href;
+
+function appFetch(path, opts = {}) {
+  const url = new URL(path.replace(/^\/?/, ""), APP_BASE_URL).href;
+  return fetch(url, { ...fetchCred, ...opts });
+}
 
 /** Tanggal lokal YYYY-MM-DD (hindari geser zona ke UTC) */
 function localISODate(d = new Date()) {
@@ -68,6 +77,9 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await loadData();
   updateNotifPanelContent();
+  
+  // Cek dan tampilkan notifikasi hari libur
+  checkAndNotifyWeekendClosure();
 
   initSidebarHover();
 
@@ -122,6 +134,7 @@ function toggleTheme() {
   syncThemeToggleLabel();
   loadCharts();
 }
+
 
 function syncThemeToggleLabel() {
   const dark = document.documentElement.getAttribute("data-theme") === "dark";
@@ -196,6 +209,26 @@ function initSidebarHover() {
   window.addEventListener("resize", syncSidebarLayout);
 }
 
+function isWeekend(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const dayOfWeek = d.getDay();
+  return dayOfWeek === 0 || dayOfWeek === 6; // 0=Minggu, 6=Sabtu
+}
+
+function getWeekendDayName(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const dayOfWeek = d.getDay();
+  return dayOfWeek === 0 ? "Minggu" : "Sabtu";
+}
+
+function checkAndNotifyWeekendClosure() {
+  const today = localISODate();
+  if (isWeekend(today)) {
+    const dayName = getWeekendDayName(today);
+    showToast(`⚠️ MBG LIBUR - Hari ${dayName}, pengambilan/pengembalian ditutup.`);
+  }
+}
+
 function initSessionUser() {
   const u = window.SIAP_USER;
   if (!u) return;
@@ -243,7 +276,7 @@ function updateSaranAccess() {
 
 async function loadNotifications() {
   try {
-    const res = await fetch("api/notifikasi.php", fetchCred);
+    const res = await appFetch("api/notifikasi.php", fetchCred);
     const j = await parseApiJson(res);
     if (j.status === "ok" && Array.isArray(j.data)) {
       State.notifications = j.data;
@@ -258,10 +291,10 @@ async function loadNotifications() {
 
 async function markAllNotificationsRead() {
   try {
-    await fetch("api/notifikasi.php", {
+    await appFetch("api/notifikasi.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({ action: "mark_all_read" }),
     });
   } catch (_) {}
@@ -324,7 +357,7 @@ async function renderMasukanPage() {
   tb.innerHTML =
     '<tr><td colspan="7" class="empty-td">Memuat masukan...</td></tr>';
   try {
-    const res = await fetch("api/saran.php", fetchCred);
+    const res = await appFetch("api/saran.php", fetchCred);
     const j = await parseApiJson(res);
     if (j.status !== "ok" || !Array.isArray(j.data)) {
       tb.innerHTML = `<tr><td colspan="7" class="empty-td">${escapeHtml(j.pesan || "Gagal memuat daftar masukan")}</td></tr>`;
@@ -400,10 +433,10 @@ async function requestMasukanFeedback(id, status) {
     `Tambahkan catatan / alasan untuk status ${status === "approved" ? "disetujui" : "ditolak"} (opsional):`,
   );
   try {
-    const res = await fetch("api/saran.php", {
+    const res = await appFetch("api/saran.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({
         action: "feedback",
         id,
@@ -426,10 +459,10 @@ async function requestMasukanFeedback(id, status) {
 async function clearMasukanHistory() {
   if (!confirm("Hapus semua riwayat masukan? Tindakan ini tidak dapat dibatalkan.")) return;
   try {
-    const res = await fetch("api/saran.php", {
+    const res = await appFetch("api/saran.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({ action: "clear_history" }),
     });
     const j = await parseApiJson(res);
@@ -507,21 +540,21 @@ async function submitLogin(ev) {
   const email = document.getElementById("login-email")?.value?.trim();
   const password = document.getElementById("login-password")?.value || "";
   try {
-    const res = await fetch("api/auth.php", {
+    const res = await appFetch("api/auth.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
       body: JSON.stringify({ action: "login", email, password }),
     });
     const j = await res.json().catch(() => ({}));
     console.log("Login response:", j, "Status:", res.status);
     if (j.status === "ok") {
       localStorage.setItem("mbg_returning_user", "1");
-      // Simpan user data ke localStorage sebagai fallback untuk cross-port access
       localStorage.setItem("mbg_user_cache", JSON.stringify(j.user || {}));
       showToast("Berhasil masuk");
-      // Tunggu lebih lama untuk memastikan session cookie tersimpan
-      setTimeout(() => location.reload(), 1000);
+      // Kembali ke dashboard secara eksplisit setelah login berhasil
+      setTimeout(() => {
+        window.location.href = APP_BASE_URL;
+      }, 500);
     } else {
       showToast(j.pesan || "Gagal masuk");
     }
@@ -541,10 +574,9 @@ async function submitRegister(ev) {
   let kelas_info = document.getElementById("reg-kelas")?.value?.trim() || "";
   if (role !== "perwakilan_kelas") kelas_info = "";
   try {
-    const res = await fetch("api/auth.php", {
+    const res = await appFetch("api/auth.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
       body: JSON.stringify({
         action: "register",
         nama,
@@ -557,10 +589,11 @@ async function submitRegister(ev) {
     const j = await res.json().catch(() => ({}));
     console.log("Register response:", j, "Status:", res.status);
     if (j.status === "ok") {
-      // Simpan user data ke localStorage sebagai fallback untuk cross-port access
       localStorage.setItem("mbg_user_cache", JSON.stringify(j.user || {}));
       showToast("Anda berhasil daftar");
-      setTimeout(() => location.reload(), 1000);
+      setTimeout(() => {
+        window.location.href = APP_BASE_URL;
+      }, 500);
     } else {
       showToast(
         j.pesan || "Pendaftaran gagal: " + (res.status || "unknown error"),
@@ -575,10 +608,9 @@ async function submitRegister(ev) {
 
 async function logoutUser() {
   try {
-    await fetch("api/auth.php", {
+    await appFetch("api/auth.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
       body: JSON.stringify({ action: "logout" }),
     });
   } catch (_) {}
@@ -625,6 +657,59 @@ function weekPickerToRange(value) {
   return { mulai: fmt(ISOweekStart), selesai: fmt(ISOweekEnd) };
 }
 
+function styleSheetHeader(ws, headerRow = 0, fillColor = "FF2F75B5") {
+  const range = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
+  for (let col = range.s.c; col <= range.e.c; col += 1) {
+    const cell = ws[XLSX.utils.encode_cell({ r: headerRow, c: col })];
+    if (!cell) continue;
+    cell.s = cell.s || {};
+    cell.s.font = { bold: true, color: { rgb: "FFFFFFFF" } };
+    cell.s.fill = { patternType: "solid", fgColor: { rgb: fillColor } };
+    cell.s.alignment = { horizontal: "center", vertical: "center" };
+    cell.s.border = {
+      top: { style: "thin", color: { rgb: "FFCCCCCC" } },
+      bottom: { style: "thin", color: { rgb: "FFCCCCCC" } },
+      left: { style: "thin", color: { rgb: "FFCCCCCC" } },
+      right: { style: "thin", color: { rgb: "FFCCCCCC" } },
+    };
+  }
+}
+
+function styleSheetRows(ws, startRow = 1, fillColor = "FFF2F2F2") {
+  const range = XLSX.utils.decode_range(ws["!ref"] || "A1:A1");
+  for (let row = startRow; row <= range.e.r; row += 1) {
+    const rowFill = row % 2 === 0 ? { rgb: fillColor } : { rgb: "FFFFFFFF" };
+    for (let col = range.s.c; col <= range.e.c; col += 1) {
+      const cell = ws[XLSX.utils.encode_cell({ r: row, c: col })];
+      if (!cell) continue;
+      cell.s = cell.s || {};
+      cell.s.fill = { patternType: "solid", fgColor: rowFill };
+      cell.s.border = {
+        top: { style: "thin", color: { rgb: "FFCCCCCC" } },
+        bottom: { style: "thin", color: { rgb: "FFCCCCCC" } },
+        left: { style: "thin", color: { rgb: "FFCCCCCC" } },
+        right: { style: "thin", color: { rgb: "FFCCCCCC" } },
+      };
+      cell.s.alignment = cell.s.alignment || { vertical: "center", horizontal: "left" };
+    }
+  }
+}
+
+function setSheetColumnWidths(ws, widths) {
+  ws["!cols"] = widths.map((w) => ({ wch: w }));
+}
+
+function addSheetTitle(ws, title, rowIndex = 0) {
+  XLSX.utils.sheet_add_aoa(ws, [[title]], { origin: { r: rowIndex, c: 0 } });
+  const titleCell = ws[XLSX.utils.encode_cell({ r: rowIndex, c: 0 })];
+  if (titleCell) {
+    titleCell.s = {
+      font: { bold: true, sz: 14, color: { rgb: "FF1F4E78" } },
+      alignment: { horizontal: "left", vertical: "center" },
+    };
+  }
+}
+
 async function exportLaporanMingguan() {
   let weekVal = document.getElementById("filter-minggu")?.value;
   if (!weekVal) weekVal = formatWeekInputValue(new Date());
@@ -645,55 +730,62 @@ async function exportLaporanMingguan() {
       showToast(data?.pesan || "Gagal mengambil data mingguan");
       return;
     }
+
     const wb = XLSX.utils.book_new();
+
     const ringkas = [
       {
-        Periode_mulai: data.periode.mulai,
-        Periode_selesai: data.periode.selesai,
-        Total_porsi: data.ringkasan.total_porsi_distribusi,
-        Catatan_baris_ambil: data.ringkasan.catatan_kelas_ambil,
-        Total_ompreng_kembali: data.ringkasan.total_ompreng_kembali,
-        Persen_kembali: data.ringkasan.persen_kembali_vs_ambil + "%",
+        Periode: `${data.periode.mulai} s/d ${data.periode.selesai}`,
+        "Total Porsi": data.ringkasan.total_porsi_distribusi,
+        "Total Pengambilan": data.ringkasan.catatan_kelas_ambil,
+        "Total Ompreng Kembali": data.ringkasan.total_ompreng_kembali,
+        "Persentase Kembali": `${data.ringkasan.persen_kembali_vs_ambil}%`,
       },
     ];
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(ringkas),
-      "Ringkasan",
-    );
+    const ringkasSheet = XLSX.utils.json_to_sheet(ringkas, { origin: "A3" });
+    addSheetTitle(ringkasSheet, "Rekap Mingguan SIAP MBG", 0);
+    styleSheetHeader(ringkasSheet, 2);
+    styleSheetRows(ringkasSheet, 3);
+    setSheetColumnWidths(ringkasSheet, [28, 18, 18, 22, 20]);
+    XLSX.utils.book_append_sheet(wb, ringkasSheet, "Ringkasan");
+
     const ambilRows = (data.detail_pengambilan || []).map((r) => ({
       Tanggal: r.tanggal,
       Jam: r.jam,
       Kelas: r.kelas,
       Jenjang: r.jenjang,
       Porsi: r.porsi_ambil,
-      Waktu_ambil: r.waktu_ambil,
-      Catatan: r.catatan || "",
+      "Waktu Ambil": r.waktu_ambil,
+      Catatan: r.catatan || "-",
     }));
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        ambilRows.length ? ambilRows : [{ Info: "Tidak ada pengambilan" }],
-      ),
-      "Pengambilan",
+    const ambilSheet = XLSX.utils.json_to_sheet(
+      ambilRows.length ? ambilRows : [{ Info: "Tidak ada pengambilan" }],
     );
+    addSheetTitle(ambilSheet, "Detail Pengambilan", 0);
+    styleSheetHeader(ambilSheet, 1);
+    styleSheetRows(ambilSheet, 2);
+    setSheetColumnWidths(ambilSheet, [14, 10, 18, 14, 10, 16, 30]);
+    XLSX.utils.book_append_sheet(wb, ambilSheet, "Pengambilan");
+
     const kembaliRows = (data.detail_pengembalian || []).map((r) => ({
       Tanggal: r.tanggal,
       Kelas: r.kelas,
       Jenjang: r.jenjang,
-      Jumlah_kembali: r.jumlah_kembali,
+      "Jumlah Kembali": r.jumlah_kembali,
       Kondisi: r.kondisi,
-      Persen: r.persen_kembali,
+      "Persen Kembali": `${r.persen_kembali}%`,
     }));
-    XLSX.utils.book_append_sheet(
-      wb,
-      XLSX.utils.json_to_sheet(
-        kembaliRows.length ? kembaliRows : [{ Info: "Tidak ada pengembalian" }],
-      ),
-      "Pengembalian",
+    const kembaliSheet = XLSX.utils.json_to_sheet(
+      kembaliRows.length ? kembaliRows : [{ Info: "Tidak ada pengembalian" }],
     );
+    addSheetTitle(kembaliSheet, "Detail Pengembalian", 0);
+    styleSheetHeader(kembaliSheet, 1);
+    styleSheetRows(kembaliSheet, 2);
+    setSheetColumnWidths(kembaliSheet, [14, 18, 14, 18, 16, 16]);
+    XLSX.utils.book_append_sheet(wb, kembaliSheet, "Pengembalian");
+
     const fname = `Laporan_MBG_${range.mulai}_${range.selesai}.xlsx`;
-    XLSX.writeFile(wb, fname);
+    XLSX.writeFile(wb, fname, { bookType: "xlsx", cellStyles: true });
     showToast("File Excel berhasil diunduh");
   } catch (e) {
     console.error(e);
@@ -721,7 +813,7 @@ async function clearRekapHistory() {
   if (!confirmed) return;
 
   try {
-    const resp = await fetch("api/rekap_clear.php", {
+    const resp = await appFetch("api/rekap_clear.php", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -1199,6 +1291,13 @@ function populateRetOptions() {
 }
 
 async function submitPengambilan() {
+  const today = localISODate();
+  if (isWeekend(today)) {
+    const dayName = getWeekendDayName(today);
+    showToast(`❌ MBG LIBUR - Hari ${dayName}, pengambilan ditutup. Coba besok.`);
+    return;
+  }
+
   const tingkat = document.getElementById("kelas-tingkat")?.value || "10";
   const huruf = document.getElementById("kelas-huruf")?.value || "X-A";
   const waktu = document.getElementById("waktu-ambil")?.value || "";
@@ -1248,6 +1347,13 @@ function resetFormPengambilan() {
 }
 
 async function submitPengembalian() {
+  const today = localISODate();
+  if (isWeekend(today)) {
+    const dayName = getWeekendDayName(today);
+    showToast(`❌ MBG LIBUR - Hari ${dayName}, pengembalian ditutup. Coba besok.`);
+    return;
+  }
+
   const kelasId = document.getElementById("ret-kelas")?.value;
   if (!kelasId) {
     showToast("Pilih kelas terlebih dahulu");
@@ -1560,7 +1666,7 @@ async function kirimKeBackend(endpoint, data) {
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify(data),
     });
     const json = await res.json().catch(() => null);
@@ -1621,7 +1727,7 @@ async function loadCharts() {
 
   let payload = null;
   try {
-    const res = await fetch("api/chart_minggu_kerja.php", fetchCred);
+    const res = await appFetch("api/chart_minggu_kerja.php", fetchCred);
     payload = await parseApiJson(res);
   } catch (_) {}
 
@@ -1759,7 +1865,7 @@ async function startQuizMBG() {
   area.style.display = "block";
   area.innerHTML = '<p class="quiz-loading">Memuat soal…</p>';
   try {
-    const res = await fetch("api/quiz.php?action=bundle", fetchCred);
+    const res = await appFetch("api/quiz.php?action=bundle", fetchCred);
     const j = await parseApiJson(res);
     if (j.status !== "ok" || !Array.isArray(j.bundle)) {
       showToast(j.pesan || "Gagal memuat quiz");
@@ -1807,10 +1913,10 @@ async function submitQuizMBG() {
     });
   }
   try {
-    const res = await fetch("api/quiz.php", {
+    const res = await appFetch("api/quiz.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({ action: "submit", jawaban }),
     });
     const j = await parseApiJson(res);
@@ -1862,7 +1968,7 @@ async function tampilkanFeedbackQuizHarian(ringkasanSkor) {
   kicker.textContent = "Feedback untuk hari Anda bermain quiz";
 
   try {
-    const res = await fetch("api/quiz_feedback_harian.php", fetchCred);
+    const res = await appFetch("api/quiz_feedback_harian.php", fetchCred);
     const j = await parseApiJson(res);
     if (j.status !== "ok") {
       title.textContent = "Feedback";
@@ -1903,10 +2009,10 @@ async function tampilkanFeedbackQuizHarian(ringkasanSkor) {
 async function deleteNotification(id) {
   if (!confirm("Hapus notifikasi ini?")) return;
   try {
-    const res = await fetch("api/notifikasi.php", {
+    const res = await appFetch("api/notifikasi.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({ action: "delete", id }),
     });
     const j = await parseApiJson(res);
@@ -1936,10 +2042,10 @@ async function kirimSaran() {
     return;
   }
   try {
-    const res = await fetch("api/saran.php", {
+    const res = await appFetch("api/saran.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({ jenis, isi }),
     });
     const j = await parseApiJson(res);
@@ -1968,10 +2074,10 @@ async function loadPetugasAdmin() {
 
 async function adminLoadFeedbackHarian() {
   try {
-    const res = await fetch("api/quiz_feedback_harian.php", {
+    const res = await appFetch("api/quiz_feedback_harian.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({ action: "list_all" }),
     });
     const j = await parseApiJson(res);
@@ -1995,10 +2101,10 @@ async function simpanFeedbackHarianAdmin() {
       document.querySelector(`.fb-pesan[data-hari="${h}"]`)?.value || "",
   }));
   try {
-    const res = await fetch("api/quiz_feedback_harian.php", {
+    const res = await appFetch("api/quiz_feedback_harian.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({ action: "save_batch", items }),
     });
     const j = await parseApiJson(res);
@@ -2013,7 +2119,7 @@ async function adminLoadUsers() {
   if (!tb) return;
   tb.innerHTML = "";
   try {
-    const res = await fetch("api/admin_petugas.php?action=users", fetchCred);
+    const res = await appFetch("api/admin_petugas.php?action=users", fetchCred);
     const j = await parseApiJson(res);
     if (j.status !== "ok") return;
     const me = window.SIAP_USER?.id;
@@ -2032,10 +2138,10 @@ async function adminLoadUsers() {
 async function adminDeleteUser(id) {
   if (!confirm("Hapus pengguna ini?")) return;
   try {
-    const res = await fetch("api/admin_petugas.php", {
+    const res = await appFetch("api/admin_petugas.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({ action: "user_delete", id }),
     });
     const j = await parseApiJson(res);
@@ -2051,7 +2157,7 @@ async function adminLoadQuiz() {
   if (!tb) return;
   tb.innerHTML = "";
   try {
-    const res = await fetch("api/admin_petugas.php?action=quiz", fetchCred);
+    const res = await appFetch("api/admin_petugas.php?action=quiz", fetchCred);
     const j = await parseApiJson(res);
     if (j.status !== "ok") return;
     (j.data || []).forEach((r) => {
@@ -2066,10 +2172,10 @@ async function adminQuizAdd() {
   const nama = document.getElementById("adm-quiz-nama")?.value?.trim();
   const petunjuk = document.getElementById("adm-quiz-petunjuk")?.value?.trim();
   try {
-    const res = await fetch("api/admin_petugas.php", {
+    const res = await appFetch("api/admin_petugas.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({
         action: "quiz_add",
         nama_menu: nama,
@@ -2091,10 +2197,10 @@ async function adminQuizAdd() {
 async function adminQuizDelete(id) {
   if (!confirm("Hapus soal ini?")) return;
   try {
-    const res = await fetch("api/admin_petugas.php", {
+    const res = await appFetch("api/admin_petugas.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify({ action: "quiz_delete", id }),
     });
     const j = await parseApiJson(res);
@@ -2124,7 +2230,7 @@ async function adminPrefillJadwal() {
     });
   }
   try {
-    const res = await fetch("api/jadwal_menu.php", fetchCred);
+    const res = await appFetch("api/jadwal_menu.php", fetchCred);
     const j = await parseApiJson(res);
     if (j.status !== "ok" || !j.hari) return;
     const keys = ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"];
@@ -2149,10 +2255,10 @@ async function simpanJadwalPetugas() {
     pesan_petugas: document.getElementById("jm-pesan")?.value || "",
   };
   try {
-    const res = await fetch("api/jadwal_menu.php", {
+    const res = await appFetch("api/jadwal_menu.php", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
+      credentials: "include",
       body: JSON.stringify(body),
     });
     const j = await parseApiJson(res);
@@ -2167,7 +2273,7 @@ async function adminLoadSaran() {
   if (!tb) return;
   tb.innerHTML = "";
   try {
-    const res = await fetch("api/saran.php", fetchCred);
+    const res = await appFetch("api/saran.php", fetchCred);
     const j = await parseApiJson(res);
     if (j.status !== "ok") return;
     (j.data || []).forEach((r) => {

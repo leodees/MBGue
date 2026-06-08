@@ -2733,7 +2733,8 @@ body.auth-body {
 /* Underline-style inputs */
 .auth-body .floating-field input {
   width: 100%;
-  padding: 14px 2px 8px;
+  padding: 14px 2px 8px 2px;
+  padding-right: 42px;
   border: none;
   border-bottom: 1.5px solid #d1d5db;
   border-radius: 0;
@@ -2745,6 +2746,7 @@ body.auth-body {
   transition: border-color 0.2s;
   box-sizing: border-box;
 }
+
 
 .auth-body .floating-field input:focus {
   border-bottom-color: #1565c0;
