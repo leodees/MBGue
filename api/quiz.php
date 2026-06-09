@@ -90,20 +90,31 @@ if (!is_array($jawaban)) {
     exit;
 }
 
+$answerMap = [];
+foreach ($jawaban as $j) {
+    $id = isset($j['id']) ? (string) $j['id'] : '';
+    if ($id !== '') {
+        $answerMap[$id] = trim((string) ($j['pilihan'] ?? ''));
+    }
+}
+
+$missing = 0;
 $benar = 0;
 $total = count($expected);
 foreach ($expected as $id => $namaBenar) {
     $idStr = (string) $id;
-    $kirim = '';
-    foreach ($jawaban as $j) {
-        if ((string) ($j['id'] ?? '') === $idStr) {
-            $kirim = trim((string) ($j['pilihan'] ?? ''));
-            break;
-        }
+    if (!array_key_exists($idStr, $answerMap) || $answerMap[$idStr] === '') {
+        $missing++;
+        continue;
     }
-    if ($kirim !== '' && strcasecmp($kirim, (string) $namaBenar) === 0) {
+    if (strcasecmp($answerMap[$idStr], (string) $namaBenar) === 0) {
         $benar++;
     }
+}
+
+if ($missing > 0) {
+    echo json_encode(['status' => 'error', 'pesan' => 'Harap jawab semua soal sebelum mengirim.']);
+    exit;
 }
 
 unset($_SESSION['quiz_jawaban'], $_SESSION['quiz_started_at']);

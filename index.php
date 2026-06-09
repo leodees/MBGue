@@ -48,6 +48,7 @@ function getDB() {
 function installDB() {
     $db = getDB();
     if (!$db) return;
+    $db->exec("DROP TABLE IF EXISTS penerima_luar;");
     $db->exec("
     CREATE TABLE IF NOT EXISTS kelas (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -64,7 +65,8 @@ function installDB() {
         foto_path VARCHAR(255),
         petugas VARCHAR(100),
         catatan TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (kelas_id) REFERENCES kelas(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS pengembalian (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -75,18 +77,8 @@ function installDB() {
         kondisi ENUM('baik','kotor','rusak') DEFAULT 'baik',
         foto_path VARCHAR(255),
         catatan TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE TABLE IF NOT EXISTS penerima_luar (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        nama VARCHAR(100) NOT NULL,
-        nik VARCHAR(20),
-        kategori ENUM('ibu_hamil','ibu_menyusui','balita','lansia') NOT NULL,
-        usia_kandungan VARCHAR(50),
-        status ENUM('aktif','nonaktif','pending') DEFAULT 'pending',
-        dokumen_path VARCHAR(255),
-        catatan TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (pengambilan_id) REFERENCES pengambilan(id) ON DELETE CASCADE
     );
     INSERT IGNORE INTO kelas (id,nama,jenjang,jumlah_siswa) VALUES
         (1,'TK A','TK',20),(2,'TK B','TK',18),
@@ -100,6 +92,12 @@ function installDB() {
         (28,'XII-A','SMA',30),(29,'XII-B','SMA',29),
         (30,'X-TKJ','SMK',34),(31,'XI-TKJ','SMK',32),(32,'XII-TKJ','SMK',30);
     ");
+
+    $db->exec("UPDATE kelas SET jenjang='TK' WHERE nama LIKE 'TK %';");
+    $db->exec("UPDATE kelas SET jenjang='SD' WHERE nama LIKE 'Kelas %';");
+    $db->exec("UPDATE kelas SET jenjang='SMP' WHERE nama REGEXP '^(VII|VIII|IX)-[A-Z]$';");
+    $db->exec("UPDATE kelas SET jenjang='SMA' WHERE nama REGEXP '^(X|XI|XII)-[A-Z]$' AND nama NOT LIKE '%TKJ';");
+    $db->exec("UPDATE kelas SET jenjang='SMK' WHERE nama LIKE '%TKJ';");
 }
 
 // ---------- TABEL PENGGUNA (LOGIN / REGISTER) ----------
@@ -159,9 +157,8 @@ if (isset($_GET['api'])) {
         $kelasAmbil = $db->query("SELECT COUNT(*) as t FROM pengambilan WHERE tanggal='$today'")->fetch()['t'];
         $totalKelas = $db->query("SELECT COUNT(*) as t FROM kelas")->fetch()['t'];
         $omprengKembali = $db->query("SELECT COUNT(DISTINCT kelas_id) as t FROM pengembalian WHERE tanggal='$today'")->fetch()['t'];
-        $ibuHamil = $db->query("SELECT COUNT(*) as t FROM penerima_luar WHERE status='aktif'")->fetch()['t'];
         $lastAktif = $db->query("SELECT p.*, k.nama as kelas_nama FROM pengambilan p JOIN kelas k ON p.kelas_id=k.id WHERE p.tanggal='$today' ORDER BY p.created_at DESC LIMIT 6")->fetchAll();
-        echo json_encode(compact('totalAmbil','kelasAmbil','totalKelas','omprengKembali','ibuHamil','lastAktif'));
+        echo json_encode(compact('totalAmbil','kelasAmbil','totalKelas','omprengKembali','lastAktif'));
         exit;
     }
 
@@ -250,47 +247,6 @@ if (isset($_GET['api'])) {
         exit;
     }
 
-    // --- GET PENERIMA LUAR ---
-    if ($api === 'penerima_luar') {
-        if (!$db) { echo json_encode(['data'=>getDemoPenerima()]); exit; }
-        $rows = $db->query("SELECT * FROM penerima_luar ORDER BY created_at DESC")->fetchAll();
-        echo json_encode(['data'=>$rows]);
-        exit;
-    }
-
-    // --- POST PENERIMA LUAR ---
-    if ($api === 'penerima_luar_add' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        $nama      = trim($_POST['nama'] ?? '');
-        $nik       = trim($_POST['nik'] ?? '');
-        $kategori  = $_POST['kategori'] ?? 'ibu_hamil';
-        $usia      = trim($_POST['usia'] ?? '');
-        $catatan   = trim($_POST['catatan'] ?? '');
-        $dokPath   = '';
-
-        if (!empty($_POST['dok_data'])) {
-            $data = str_replace(['data:image/jpeg;base64,','data:application/pdf;base64,',' '], ['','','+'], $_POST['dok_data']);
-            $ext  = strpos($_POST['dok_data'],'pdf') !== false ? 'pdf' : 'jpg';
-            $fname = 'dok_' . time() . '.' . $ext;
-            file_put_contents($uploadDir . $fname, base64_decode($data));
-            $dokPath = 'uploads/' . $fname;
-        }
-
-        if (!$db) { echo json_encode(['ok'=>true,'demo'=>true]); exit; }
-        $stmt = $db->prepare("INSERT INTO penerima_luar (nama,nik,kategori,usia_kandungan,catatan,dokumen_path,status) VALUES (?,?,?,?,?,?,'pending')");
-        $stmt->execute([$nama,$nik,$kategori,$usia,$catatan,$dokPath]);
-        echo json_encode(['ok'=>true]);
-        exit;
-    }
-
-    // --- PATCH STATUS PENERIMA LUAR ---
-    if ($api === 'update_status' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-        $id = (int)($_POST['id'] ?? 0);
-        $status = $_POST['status'] ?? 'aktif';
-        if (!$db) { echo json_encode(['ok'=>true]); exit; }
-        $db->prepare("UPDATE penerima_luar SET status=? WHERE id=?")->execute([$status,$id]);
-        echo json_encode(['ok'=>true]);
-        exit;
-    }
 
     echo json_encode(['ok'=>false,'msg'=>'API tidak ditemukan']);
     exit;
@@ -314,7 +270,7 @@ function getDemoKelas() {
 function getDemoStats($today) {
     return [
         'totalAmbil'=>756,'kelasAmbil'=>18,'totalKelas'=>32,
-        'omprengKembali'=>12,'ibuHamil'=>23,
+        'omprengKembali'=>12,
         'lastAktif'=>[
             ['kelas_nama'=>'VII-A','jumlah_ambil'=>32,'created_at'=>$today.' 07:42:00'],
             ['kelas_nama'=>'VIII-B','jumlah_ambil'=>30,'created_at'=>$today.' 07:51:00'],
@@ -333,13 +289,6 @@ function getDemoRekap() {
     ];
 }
 function getDemoTotal() { return 160; }
-function getDemoPenerima() {
-    return [
-        ['id'=>1,'nama'=>'Sari Wahyuni','nik'=>'332x','kategori'=>'ibu_hamil','usia_kandungan'=>'28 minggu','status'=>'aktif','catatan'=>''],
-        ['id'=>2,'nama'=>'Dewi Lestari','nik'=>'334x','kategori'=>'balita','usia_kandungan'=>'8 bulan','status'=>'aktif','catatan'=>''],
-        ['id'=>3,'nama'=>'Rina Safitri','nik'=>'335x','kategori'=>'ibu_menyusui','usia_kandungan'=>'—','status'=>'pending','catatan'=>'Menunggu dokumen'],
-    ];
-}
 
 // AUTO INSTALL
 installDB();
@@ -746,7 +695,7 @@ if ($wa_message !== '') {
               </div>
               <p class="cam-label">Buka Kamera</p>
               <span class="cam-hint">Foto langsung dikompres &amp; diberi stempel</span>
-            </div>
+            </div><span class="cam-hint">Foto langsung dikompres &amp; diberi stempel</span>
             <input type="file" id="cam-input" accept="image/*" capture="environment" class="sr-only" tabindex="-1" aria-hidden="true" onchange="handleFoto(event)">
             <div class="foto-result" id="foto-result" style="display:none">
               <img id="foto-preview" alt="Preview foto">

@@ -23,7 +23,8 @@ const FOTO_MAX_W = 900;
 const FOTO_QUALITY = 0.75;
 
 const fetchCred = { credentials: "include" };
-const rawAppBaseUrl = document.querySelector("base")?.href || window.APP_BASE_URL || "./";
+const rawAppBaseUrl =
+  document.querySelector("base")?.href || window.APP_BASE_URL || "./";
 const APP_BASE_URL = rawAppBaseUrl.match(/^https?:\/\//i)
   ? rawAppBaseUrl
   : new URL(rawAppBaseUrl, window.location.origin).href;
@@ -77,7 +78,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await loadData();
   updateNotifPanelContent();
-  
+
   // Cek dan tampilkan notifikasi hari libur
   checkAndNotifyWeekendClosure();
 
@@ -134,7 +135,6 @@ function toggleTheme() {
   syncThemeToggleLabel();
   loadCharts();
 }
-
 
 function syncThemeToggleLabel() {
   const dark = document.documentElement.getAttribute("data-theme") === "dark";
@@ -225,7 +225,9 @@ function checkAndNotifyWeekendClosure() {
   const today = localISODate();
   if (isWeekend(today)) {
     const dayName = getWeekendDayName(today);
-    showToast(`⚠️ MBG LIBUR - Hari ${dayName}, pengambilan/pengembalian ditutup.`);
+    showToast(
+      `⚠️ MBG LIBUR - Hari ${dayName}, pengambilan/pengembalian ditutup.`,
+    );
   }
 }
 
@@ -457,7 +459,12 @@ async function requestMasukanFeedback(id, status) {
 }
 
 async function clearMasukanHistory() {
-  if (!confirm("Hapus semua riwayat masukan? Tindakan ini tidak dapat dibatalkan.")) return;
+  if (
+    !confirm(
+      "Hapus semua riwayat masukan? Tindakan ini tidak dapat dibatalkan.",
+    )
+  )
+    return;
   try {
     const res = await appFetch("api/saran.php", {
       method: "POST",
@@ -690,7 +697,10 @@ function styleSheetRows(ws, startRow = 1, fillColor = "FFF2F2F2") {
         left: { style: "thin", color: { rgb: "FFCCCCCC" } },
         right: { style: "thin", color: { rgb: "FFCCCCCC" } },
       };
-      cell.s.alignment = cell.s.alignment || { vertical: "center", horizontal: "left" };
+      cell.s.alignment = cell.s.alignment || {
+        vertical: "center",
+        horizontal: "left",
+      };
     }
   }
 }
@@ -947,8 +957,6 @@ function initJenjangSMK() {
     ["PM 2", "PM 2"],
     ["AKL 1", "AKL 1"],
     ["AKL 2", "AKL 2"],
-    ["TKJ 1", "TKJ 1"],
-    ["TKJ 2", "TKJ 2"],
   ];
   hurufOptions.forEach(([v, label]) => {
     const opt = document.createElement("option");
@@ -1294,7 +1302,9 @@ async function submitPengambilan() {
   const today = localISODate();
   if (isWeekend(today)) {
     const dayName = getWeekendDayName(today);
-    showToast(`❌ MBG LIBUR - Hari ${dayName}, pengambilan ditutup. Coba besok.`);
+    showToast(
+      `❌ MBG LIBUR - Hari ${dayName}, pengambilan ditutup. Coba besok.`,
+    );
     return;
   }
 
@@ -1350,7 +1360,9 @@ async function submitPengembalian() {
   const today = localISODate();
   if (isWeekend(today)) {
     const dayName = getWeekendDayName(today);
-    showToast(`❌ MBG LIBUR - Hari ${dayName}, pengembalian ditutup. Coba besok.`);
+    showToast(
+      `❌ MBG LIBUR - Hari ${dayName}, pengembalian ditutup. Coba besok.`,
+    );
     return;
   }
 
@@ -1905,12 +1917,21 @@ function escapeHtmlAttr(s) {
 
 async function submitQuizMBG() {
   const jawaban = [];
+  let missing = 0;
   for (const soal of QuizBundle) {
     const picked = document.querySelector(`input[name="q_${soal.id}"]:checked`);
+    const pilihan = picked ? picked.value : "";
+    if (!pilihan) {
+      missing += 1;
+    }
     jawaban.push({
       id: soal.id,
-      pilihan: picked ? picked.value : "",
+      pilihan,
     });
+  }
+  if (missing > 0) {
+    showToast("Harap jawab semua soal sebelum mengirim.");
+    return;
   }
   try {
     const res = await appFetch("api/quiz.php", {
